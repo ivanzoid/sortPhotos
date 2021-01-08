@@ -12,7 +12,7 @@ import (
 )
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "usage: %v <charCount>\n", filepath.Base(os.Args[0]))
+	fmt.Fprintf(os.Stderr, "usage: %v <charCount> [prefixCharCountToRemove]\n", filepath.Base(os.Args[0]))
 	os.Exit(2)
 }
 
@@ -22,11 +22,18 @@ func main() {
 	flag.Parse()
 
 	charCount := 8
+	prefixCharCountToRemove := 0
 
 	if flag.NArg() > 0 {
 		arg := flag.Arg(0)
 		if count, err := strconv.ParseInt(arg, 10, 64); err == nil {
 			charCount = int(count)
+		}
+		if flag.NArg() > 1 {
+			arg2 := flag.Arg(1)
+			if prefixCount, err := strconv.ParseInt(arg2, 10, 64); err == nil {
+				prefixCharCountToRemove = int(prefixCount)
+			}
 		}
 	}
 
@@ -35,10 +42,29 @@ func main() {
 		log.Fatal(err)
 	}
 
+	pwd, _ := os.Getwd()
+
 	processFile := func(path string, fileInfo os.FileInfo, err error) error {
-		if fileInfo.IsDir() {
+		localPath := strings.TrimPrefix(path, pwd)
+		if len(localPath) == 0 {
 			return nil
 		}
+		if len(localPath) > 0 {
+			localPath = strings.TrimPrefix(localPath, "/")
+		}
+		if strings.Contains(localPath, "/") {
+			return nil
+		}
+		if strings.HasPrefix(localPath, ".") || strings.HasPrefix(localPath, "#") {
+			return nil
+		}
+
+		// if fileInfo.IsDir() {
+		// 	return nil
+		// }
+
+		// fmt.Printf("path='%v'\n", path)
+		// fmt.Printf("localPath='%v'\n", localPath)
 
 		name := fileInfo.Name()
 
@@ -49,10 +75,18 @@ func main() {
 			groupName = name[:charCount]
 		}
 
-		fmt.Printf("%v -> %v\n", name, groupName)
-
 		runProgram("mkdir", "-p", groupName)
-		runProgram1("mv", name, groupName)
+
+		if prefixCharCountToRemove == 0 || len(name) <= prefixCharCountToRemove {
+			fmt.Printf("%v -> %v\n", name, groupName)
+			runProgram1("mv", name, groupName)
+		} else {
+			outName := name[prefixCharCountToRemove:]
+			outPath := fmt.Sprintf("%v/%v", groupName, outName)
+
+			fmt.Printf("%v -> %v\n", name, outPath)
+			runProgram1("mv", name, outPath)
+		}
 
 		return nil
 	}
@@ -73,8 +107,8 @@ func runProgram1(program string, args ...string) (string, error) {
 }
 
 func runProgram(program string, args ...string) ([]string, error) {
-
-	// dlog("Running %v", cmdString(program, args))
+	// fmt.Printf("Running %v\n", cmdString(program, args))
+	// return nil, nil
 
 	cmd := exec.Command(program, args...)
 
