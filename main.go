@@ -11,13 +11,19 @@ import (
 	"strings"
 )
 
-func usage() {
-	fmt.Fprintf(os.Stderr, "usage: %v <charCount> [prefixCharCountToRemove]\n", filepath.Base(os.Args[0]))
-	os.Exit(2)
+var usage = func() {
+	fmt.Fprintf(os.Stderr, "Usage:\n  %v [options] <charCount> [prefixCharCountToRemove]\n", filepath.Base(os.Args[0]))
+	fmt.Fprintf(os.Stderr, "Options:\n")
+	flag.PrintDefaults()
 }
 
 func main() {
-
+	verbose := flag.Bool("v", false, "Verbose")
+	veryVerbose := flag.Bool("vv", false, "Very verbose")
+	dryRun := flag.Bool("d", false, "Dry run")
+	nonRecursive := flag.Bool("nr", false, "Non-recursive mode")
+	processFilesOnly := flag.Bool("pf", false, "Process only files")
+	processDirsOnly := flag.Bool("pd", false, "Process only directories")
 	flag.Usage = usage
 	flag.Parse()
 
@@ -46,25 +52,30 @@ func main() {
 
 	processFile := func(path string, fileInfo os.FileInfo, err error) error {
 		localPath := strings.TrimPrefix(path, pwd)
+
 		if len(localPath) == 0 {
 			return nil
 		}
+
 		if len(localPath) > 0 {
 			localPath = strings.TrimPrefix(localPath, "/")
 		}
-		if strings.Contains(localPath, "/") {
+
+		if *veryVerbose {
+			fmt.Printf("path='%v', localPath='%v'\n", path, localPath)
+		}
+
+		if *nonRecursive && strings.Contains(localPath, "/") {
 			return nil
 		}
+
 		if strings.HasPrefix(localPath, ".") || strings.HasPrefix(localPath, "#") {
 			return nil
 		}
 
-		// if fileInfo.IsDir() {
-		// 	return nil
-		// }
-
-		// fmt.Printf("path='%v'\n", path)
-		// fmt.Printf("localPath='%v'\n", localPath)
+		if (*processDirsOnly && !fileInfo.IsDir()) || (*processFilesOnly && fileInfo.IsDir()) {
+			return nil
+		}
 
 		name := fileInfo.Name()
 
@@ -75,17 +86,24 @@ func main() {
 			groupName = name[:charCount]
 		}
 
-		runProgram("mkdir", "-p", groupName)
+		runProgram(!*dryRun, *verbose || *veryVerbose, "mkdir", "-p", groupName)
 
 		if prefixCharCountToRemove == 0 || len(name) <= prefixCharCountToRemove {
 			fmt.Printf("%v -> %v\n", name, groupName)
-			runProgram1("mv", name, groupName)
+			runProgram1(!*dryRun, *verbose || *veryVerbose, "mv", name, groupName)
 		} else {
 			outName := name[prefixCharCountToRemove:]
 			outPath := fmt.Sprintf("%v/%v", groupName, outName)
+			if len(groupName) == 0 {
+				outPath = outName
+			}
 
-			fmt.Printf("%v -> %v\n", name, outPath)
-			runProgram1("mv", name, outPath)
+			slashOrEmpty := ""
+			if fileInfo.IsDir() {
+				slashOrEmpty = "/"
+			}
+			fmt.Printf("%v%v -> %v%v\n", name, slashOrEmpty, outPath, slashOrEmpty)
+			runProgram1(!*dryRun, *verbose || *veryVerbose, "mv", name, outPath)
 		}
 
 		return nil
@@ -94,8 +112,8 @@ func main() {
 	err = filepath.Walk(searchDir, processFile)
 }
 
-func runProgram1(program string, args ...string) (string, error) {
-	outStrings, err := runProgram(program, args...)
+func runProgram1(run bool, verbose bool, program string, args ...string) (string, error) {
+	outStrings, err := runProgram(run, verbose, program, args...)
 	if err != nil {
 		return "", err
 	}
@@ -106,20 +124,25 @@ func runProgram1(program string, args ...string) (string, error) {
 	return outStrings[0], nil
 }
 
-func runProgram(program string, args ...string) ([]string, error) {
-	// fmt.Printf("Running %v\n", cmdString(program, args))
-	// return nil, nil
+func runProgram(run bool, verbose bool, program string, args ...string) ([]string, error) {
+	if verbose {
+		fmt.Printf("$ %v\n", cmdString(program, args))
+	}
+
+	if !run {
+		return []string{}, nil
+	}
 
 	cmd := exec.Command(program, args...)
 
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, err
+		return []string{}, err
 	}
 
 	outString := string(out)
 	if len(outString) == 0 {
-		return nil, nil
+		return []string{}, nil
 	}
 
 	outStrings := strings.Split(outString, "\n")
